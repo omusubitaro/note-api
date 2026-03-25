@@ -25,7 +25,7 @@ function extractFirstImage(html: string) {
 
 export default async function handler(req: any, res: any) {
   try {
-    const NOTE_RSS_URL = "https://note.com/que_qbo/rss"
+    const NOTE_RSS_URL = "https://note.com/qboc/m/m20d018cc8d7a/rss"
 
     const rssRes = await fetch(NOTE_RSS_URL, {
       headers: {
