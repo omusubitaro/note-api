@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     })
     const rssText = await rssRes.text()
 
-    const rawItems = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 4)
+    const rawItems = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 10)
 
     const items = await Promise.all(
       rawItems.map(async (match) => {
@@ -52,7 +52,6 @@ export default async function handler(req, res) {
               articleHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i)?.[1] ||
               ""
           } catch (e) {
-            // 記事HTML取得失敗時は空のまま
           }
         }
 
