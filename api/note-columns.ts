@@ -30,15 +30,30 @@ export default async function handler(req: any, res: any) {
     const rssRes = await fetch(NOTE_RSS_URL, {
       headers: {
         "User-Agent": "Mozilla/5.0",
+        "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
       },
     })
 
+    const rssText = await rssRes.text()
+
     if (!rssRes.ok) {
-      return res.status(500).json({ error: "RSS取得に失敗しました" })
+      return res.status(500).json({
+        error: "RSS取得に失敗しました",
+        status: rssRes.status,
+        url: NOTE_RSS_URL,
+        bodyHead: rssText.slice(0, 300),
+      })
     }
 
-    const rssText = await rssRes.text()
     const items = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1])
+
+    if (items.length === 0) {
+      return res.status(500).json({
+        error: "RSSは取得できましたが item が見つかりません",
+        url: NOTE_RSS_URL,
+        bodyHead: rssText.slice(0, 500),
+      })
+    }
 
     const data: NoteItem[] = items.slice(0, 4).map((item) => {
       const title =
@@ -73,10 +88,10 @@ export default async function handler(req: any, res: any) {
     res.setHeader("Access-Control-Allow-Origin", "*")
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400")
     return res.status(200).json({ items: data })
-  } catch (e) {
+  } catch (e: any) {
     return res.status(500).json({
       error: "データ取得中にエラーが発生しました",
-      detail: String(e),
+      detail: String(e?.message || e),
     })
   }
 }
