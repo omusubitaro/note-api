@@ -10,13 +10,19 @@ export default async function handler(req, res) {
       .map((match) => {
         const xml = match[1]
 
-        const title = xml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] || ""
+        const title =
+          xml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] ||
+          xml.match(/<title>(.*?)<\/title>/)?.[1] ||
+          ""
+
         const link = xml.match(/<link>(.*?)<\/link>/)?.[1] || ""
+
         const pubDate = xml.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || ""
 
         const image =
           xml.match(/media:thumbnail[^>]*url="([^"]+)"/)?.[1] ||
           xml.match(/media:content[^>]*url="([^"]+)"/)?.[1] ||
+          xml.match(/<img[^>]+src="([^"]+)"/)?.[1] ||
           ""
 
         return { title, link, pubDate, image }
