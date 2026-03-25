@@ -18,9 +18,32 @@ function stripHtml(html: string) {
     .trim()
 }
 
-function extractFirstImage(html: string) {
-  const match = html.match(/<img[^>]+src="([^"]+)"/i)
-  return match?.[1] ?? ""
+function extractAuthorFromLink(link: string) {
+  const match = link.match(/note\.com\/([^/]+)\//i)
+  return match?.[1] ?? "note"
+}
+
+async function fetchOgImage(url: string) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+    })
+
+    if (!res.ok) return ""
+
+    const html = await res.text()
+
+    const ogMatch =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
+
+    return ogMatch?.[1] ?? ""
+  } catch {
+    return ""
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -55,7 +78,7 @@ export default async function handler(req: any, res: any) {
       })
     }
 
-    const data: NoteItem[] = items.slice(0, 4).map((item) => {
+    const baseItems = items.slice(0, 4).map((item) => {
       const title =
         item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] ||
         item.match(/<title>(.*?)<\/title>/)?.[1] ||
@@ -70,20 +93,24 @@ export default async function handler(req: any, res: any) {
 
       const pubDate = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || ""
 
-      const creator =
-        item.match(/<dc:creator><!\[CDATA\[(.*?)\]\]><\/dc:creator>/)?.[1] ||
-        item.match(/<dc:creator>(.*?)<\/dc:creator>/)?.[1] ||
-        "note"
-
       return {
         title: stripHtml(title),
         link: link.trim(),
         description: stripHtml(descriptionRaw).slice(0, 110),
         pubDate,
-        thumbnail: extractFirstImage(descriptionRaw),
-        author: stripHtml(creator),
+        author: extractAuthorFromLink(link),
       }
     })
+
+    const data: NoteItem[] = await Promise.all(
+      baseItems.map(async (item) => {
+        const thumbnail = await fetchOgImage(item.link)
+        return {
+          ...item,
+          thumbnail,
+        }
+      })
+    )
 
     res.setHeader("Access-Control-Allow-Origin", "*")
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400")
