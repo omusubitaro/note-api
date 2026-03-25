@@ -172,7 +172,7 @@ export default async function handler(req: any, res: any) {
 
     const items = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1])
 
-    const baseItems = items.slice(0, 4).map((item) => {
+    const baseItems = items.slice(0, 9).map((item) => {
       const title =
         item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] ||
         item.match(/<title>(.*?)<\/title>/)?.[1] ||
