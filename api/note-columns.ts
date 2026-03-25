@@ -1,7 +1,3 @@
-export const config = {
-  runtime: "edge",
-}
-
 type NoteItem = {
   title: string
   link: string
@@ -27,31 +23,21 @@ function extractFirstImage(html: string) {
   return match?.[1] ?? ""
 }
 
-export default async function handler(req: Request) {
+export default async function handler(req: any, res: any) {
   try {
-    // ここをあなたのnote RSSに変更
-    // 例: https://note.com/que_qbo/rss
     const NOTE_RSS_URL = "https://note.com/que_qbo/rss"
 
     const rssRes = await fetch(NOTE_RSS_URL, {
       headers: {
         "User-Agent": "Mozilla/5.0",
       },
-      cache: "no-store",
     })
 
     if (!rssRes.ok) {
-      return new Response(
-        JSON.stringify({ error: "RSS取得に失敗しました" }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-        }
-      )
+      return res.status(500).json({ error: "RSS取得に失敗しました" })
     }
 
     const rssText = await rssRes.text()
-
     const items = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1])
 
     const data: NoteItem[] = items.slice(0, 4).map((item) => {
@@ -74,37 +60,23 @@ export default async function handler(req: Request) {
         item.match(/<dc:creator>(.*?)<\/dc:creator>/)?.[1] ||
         "note"
 
-      const thumbnail = extractFirstImage(descriptionRaw)
-      const description = stripHtml(descriptionRaw).slice(0, 110)
-
       return {
         title: stripHtml(title),
         link: link.trim(),
-        description,
+        description: stripHtml(descriptionRaw).slice(0, 110),
         pubDate,
-        thumbnail,
+        thumbnail: extractFirstImage(descriptionRaw),
         author: stripHtml(creator),
       }
     })
 
-    return new Response(JSON.stringify({ items: data }), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400",
-      },
+    res.setHeader("Access-Control-Allow-Origin", "*")
+    res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400")
+    return res.status(200).json({ items: data })
+  } catch (e) {
+    return res.status(500).json({
+      error: "データ取得中にエラーが発生しました",
+      detail: String(e),
     })
-  } catch (error) {
-    return new Response(
-      JSON.stringify({
-        error: "データ取得中にエラーが発生しました",
-        detail: String(error),
-      }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-      }
-    )
   }
 }
