@@ -3,15 +3,34 @@ import vm from "node:vm"
 const MAGAZINE_URL = "https://note.com/qboc/m/m20d018cc8d7a"
 
 function extractNuxt(html) {
-  const match = html.match(/window\.__NUXT__=(\(function\([\s\S]*?\)\([\s\S]*?\)\);?)/)
-  if (!match) throw new Error("NUXT data not found")
-  return vm.runInNewContext(match[1], Object.create(null), { timeout: 100 })
+  const marker = "window.__NUXT__="
+  const start = html.indexOf(marker)
+  if (start === -1) {
+    throw new Error("NUXT marker not found")
+  }
+
+  const from = start + marker.length
+  const scriptEnd = html.indexOf("</script>", from)
+  if (scriptEnd === -1) {
+    throw new Error("NUXT script end not found")
+  }
+
+  let code = html.slice(from, scriptEnd).trim()
+
+  if (code.endsWith(";")) {
+    code = code.slice(0, -1)
+  }
+
+  return vm.runInNewContext(code, Object.create(null), { timeout: 100 })
 }
 
 function stripHtml(input = "") {
   return input
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -19,10 +38,7 @@ function stripHtml(input = "") {
 function collectNotes(node, out = []) {
   if (!node || typeof node !== "object") return out
 
-  if (
-    typeof node.noteUrl === "string" &&
-    typeof node.name === "string"
-  ) {
+  if (typeof node.noteUrl === "string" && typeof node.name === "string") {
     out.push(node)
   }
 
@@ -36,7 +52,10 @@ function collectNotes(node, out = []) {
 export default async function handler(req, res) {
   try {
     const html = await fetch(MAGAZINE_URL, {
-      headers: { "user-agent": "Mozilla/5.0" },
+      headers: {
+        "user-agent": "Mozilla/5.0",
+        "accept-language": "ja,en-US;q=0.9,en;q=0.8",
+      },
     }).then((r) => r.text())
 
     const nuxt = extractNuxt(html)
