@@ -1,5 +1,8 @@
 import vm from "node:vm"
 
+const NOTE_RSS_URL = "https://note.com/qboc/m/m20d018cc8d7a/rss"
+const NOTE_MAGAZINE_URL = "https://note.com/qboc/m/m20d018cc8d7a"
+
 function decodeHtml(text = "") {
   return text
     .replace(/&nbsp;/g, " ")
@@ -11,40 +14,11 @@ function decodeHtml(text = "") {
 }
 
 function stripHtml(html = "") {
-  return decodeHtml(
-    html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
-  )
-}
-
-function pickMeta(html, key) {
-  const patterns = [
-    new RegExp(`<meta[^>]+property=["']${key}["'][^>]+content=["']([^"']+)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${key}["']`, "i"),
-    new RegExp(`<meta[^>]+name=["']${key}["'][^>]+content=["']([^"']+)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${key}["']`, "i"),
-  ]
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern)
-    if (match && match[1]) return decodeHtml(match[1])
-  }
-
-  return ""
-}
-
-function extractFirstImage(html) {
-  const og = pickMeta(html, "og:image")
-  if (og) return og
-
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i)
-  return match ? match[1] : ""
+  return decodeHtml(html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim())
 }
 
 function extractNuxt(html) {
-  const match = html.match(
-    /window\.__NUXT__=(\(function\([\s\S]*?\)\([\s\S]*?\)\);?)/
-  )
-
+  const match = html.match(/window\.__NUXT__=(\(function\([\s\S]*?\)\([\s\S]*?\)\);?)/)
   if (!match) return null
 
   try {
@@ -54,111 +28,72 @@ function extractNuxt(html) {
   }
 }
 
-function findNoteData(node) {
-  if (!node || typeof node !== "object") return null
+function collectNotes(node, out = []) {
+  if (!node || typeof node !== "object") return out
 
   if (
     typeof node.noteUrl === "string" &&
     typeof node.name === "string" &&
     typeof node.likeCount === "number"
   ) {
-    return node
+    out.push(node)
   }
 
-  const values = Array.isArray(node) ? node : Object.values(node)
-
-  for (const value of values) {
-    const found = findNoteData(value)
-    if (found) return found
+  for (const value of Array.isArray(node) ? node : Object.values(node)) {
+    collectNotes(value, out)
   }
 
-  return null
+  return out
 }
 
-async function fetchArticleMeta(link) {
-  try {
-    const res = await fetch(link, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
+async function fetchMagazineMetaMap() {
+  const res = await fetch(NOTE_MAGAZINE_URL, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+  })
+
+  if (!res.ok) return new Map()
+
+  const html = await res.text()
+  const nuxt = extractNuxt(html)
+  if (!nuxt) return new Map()
+
+  const notes = collectNotes(nuxt)
+  const map = new Map()
+
+  for (const note of notes) {
+    if (!note.noteUrl || map.has(note.noteUrl)) continue
+
+    map.set(note.noteUrl, {
+      title: stripHtml(note.name || ""),
+      description: stripHtml(note.body || note.description || ""),
+      thumbnail: note.eyecatch || "",
+      author:
+        (note.user && (note.user.nickname || note.user.name)) || "",
+      avatar:
+        (note.user && note.user.userProfileImagePath) || "",
+      likes:
+        typeof note.likeCount === "number" ? note.likeCount : 0,
+      pubDate: note.publishAt || "",
     })
-
-    if (!res.ok) {
-      return {
-        thumbnail: "",
-        author: "",
-        avatar: "",
-        likes: 0,
-      }
-    }
-
-    const html = await res.text()
-    const nuxt = extractNuxt(html)
-    const note = nuxt ? findNoteData(nuxt) : null
-
-    const title =
-      (note && note.name) ||
-      pickMeta(html, "og:title") ||
-      (html.match(/<title>(.*?)<\/title>/i) || [])[1] ||
-      ""
-
-    const description =
-      (note && (note.body || note.description)) ||
-      pickMeta(html, "og:description") ||
-      pickMeta(html, "description") ||
-      ""
-
-    const thumbnail =
-      (note && note.eyecatch) ||
-      extractFirstImage(html)
-
-    const author =
-      (note &&
-        note.user &&
-        (note.user.nickname || note.user.name || "")) ||
-      (html.match(/<meta[^>]+name=["']author["'][^>]+content=["']([^"']+)["']/i) || [])[1] ||
-      ""
-
-    const avatar =
-      (note &&
-        note.user &&
-        note.user.userProfileImagePath) ||
-      ""
-
-    const likes =
-      note && typeof note.likeCount === "number"
-        ? note.likeCount
-        : 0
-
-    return {
-      title: stripHtml(title),
-      description: stripHtml(description),
-      thumbnail,
-      author: stripHtml(author),
-      avatar,
-      likes,
-    }
-  } catch {
-    return {
-      thumbnail: "",
-      author: "",
-      avatar: "",
-      likes: 0,
-    }
   }
+
+  return map
 }
 
 export default async function handler(req, res) {
   try {
-    const NOTE_RSS_URL = "https://note.com/qboc/m/m20d018cc8d7a/rss"
-
-    const rssRes = await fetch(NOTE_RSS_URL, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
-      },
-    })
+    const [rssRes, metaMap] = await Promise.all([
+      fetch(NOTE_RSS_URL, {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        },
+      }),
+      fetchMagazineMetaMap(),
+    ])
 
     const rssText = await rssRes.text()
 
@@ -172,7 +107,7 @@ export default async function handler(req, res) {
 
     const items = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1])
 
-    const baseItems = items.slice(0, 9).map((item) => {
+    const enriched = items.slice(0, 9).map((item) => {
       const title =
         (item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || [])[1] ||
         (item.match(/<title>(.*?)<\/title>/) || [])[1] ||
@@ -186,31 +121,19 @@ export default async function handler(req, res) {
         ""
 
       const pubDate = (item.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || ""
+      const meta = metaMap.get(link) || {}
 
       return {
-        title: stripHtml(title),
+        title: meta.title || stripHtml(title),
         link,
-        description: stripHtml(descriptionRaw),
-        pubDate,
+        description: meta.description || stripHtml(descriptionRaw),
+        pubDate: meta.pubDate || pubDate,
+        thumbnail: meta.thumbnail || "",
+        author: meta.author || "note",
+        avatar: meta.avatar || "",
+        likes: typeof meta.likes === "number" ? meta.likes : 0,
       }
     })
-
-    const enriched = await Promise.all(
-      baseItems.map(async (item) => {
-        const meta = await fetchArticleMeta(item.link)
-
-        return {
-          title: meta.title || item.title,
-          link: item.link,
-          description: meta.description || item.description,
-          pubDate: item.pubDate,
-          thumbnail: meta.thumbnail || "",
-          author: meta.author || "note",
-          avatar: meta.avatar || "",
-          likes: meta.likes || 0,
-        }
-      })
-    )
 
     res.setHeader("Access-Control-Allow-Origin", "*")
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400")
