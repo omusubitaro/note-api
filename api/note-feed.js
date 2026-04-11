@@ -1,72 +1,68 @@
-import vm from "node:vm"
-
-const MAGAZINE_URL = "https://note.com/qboc/m/m20d018cc8d7a"
-
-function extractNuxt(html) {
-    const match = html.match(
-        /window\.__NUXT__=(\(function\([\s\S]*?\)\([\s\S]*?\)\);?)<\/script>/
-    )
-    if (!match) throw new Error("NUXT data not found")
-    return vm.runInNewContext(match[1], Object.create(null), { timeout: 100 })
-}
-
-function stripHtml(input = "") {
-    return input
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-}
-
-function collectNotes(node, out = []) {
-    if (!node || typeof node !== "object") return out
-
-    if (
-        typeof node.noteUrl === "string" &&
-        typeof node.name === "string" &&
-        typeof node.likeCount === "number"
-    ) {
-        out.push(node)
-    }
-
-    for (const value of Array.isArray(node) ? node : Object.values(node)) {
-        collectNotes(value, out)
-    }
-
-    return out
-}
-
 export default async function handler(req, res) {
-    try {
-        const html = await fetch(MAGAZINE_URL, {
-            headers: { "user-agent": "Mozilla/5.0" },
-        }).then((r) => r.text())
+  try {
+    const rssUrl = "https://note.com/qboc/m/m20d018cc8d7a/rss"
 
-        const nuxt = extractNuxt(html)
-        const seen = new Set()
+    const rssRes = await fetch(rssUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+      },
+    })
+    const rssText = await rssRes.text()
 
-        const items = collectNotes(nuxt)
-            .filter((note) => {
-                if (seen.has(note.noteUrl)) return false
-                seen.add(note.noteUrl)
-                return true
+    const rawItems = [...rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 10)
+
+    const items = await Promise.all(
+      rawItems.map(async (match) => {
+        const xml = match[1]
+
+        const title =
+          xml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] ||
+          xml.match(/<title>(.*?)<\/title>/)?.[1] ||
+          ""
+
+        const link =
+          xml.match(/<link>(.*?)<\/link>/)?.[1]?.trim() ||
+          ""
+
+        const pubDate =
+          xml.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ||
+          ""
+
+        let image =
+          xml.match(/media:thumbnail[^>]*url="([^"]+)"/i)?.[1] ||
+          xml.match(/media:content[^>]*url="([^"]+)"/i)?.[1] ||
+          xml.match(/<img[^>]+src="([^"]+)"/i)?.[1] ||
+          ""
+
+        if (!image && link) {
+          try {
+            const articleRes = await fetch(link, {
+              headers: {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              },
             })
-            .map((note) => ({
-                title: note.name,
-                link: note.noteUrl,
-                description: stripHtml(note.body || note.description || ""),
-                pubDate: note.publishAt,
-                thumbnail: note.eyecatch || "",
-                author: (note.user && (note.user.nickname || note.user.name)) || "",
-                avatar: (note.user && note.user.userProfileImagePath) || "",
-                likes: note.likeCount,
-            }))
+            const articleHtml = await articleRes.text()
 
-        res.status(200).json({ items })
-    } catch (error) {
-        res.status(500).json({
-            error: "Failed to fetch note feed",
-            details: error instanceof Error ? error.message : String(error),
-        })
-    }
+            image =
+              articleHtml.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+              articleHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1] ||
+              articleHtml.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+              articleHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i)?.[1] ||
+              ""
+          } catch (e) {
+          }
+        }
+
+        return { title, link, pubDate, image }
+      })
+    )
+
+    res.setHeader("Access-Control-Allow-Origin", "*")
+    res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400")
+    res.status(200).json({ items })
+  } catch (e) {
+    res.status(500).json({ error: "error" })
+  }
 }
