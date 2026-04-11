@@ -2,7 +2,7 @@ import vm from "node:vm"
 
 const MAGAZINE_URL = "https://note.com/qboc/m/m20d018cc8d7a"
 
-function extractNuxt(html: string) {
+function extractNuxt(html) {
     const match = html.match(
         /window\.__NUXT__=(\(function\([\s\S]*?\)\([\s\S]*?\)\);?)<\/script>/
     )
@@ -18,7 +18,7 @@ function stripHtml(input = "") {
         .trim()
 }
 
-function collectNotes(node: any, out: any[] = []) {
+function collectNotes(node, out = []) {
     if (!node || typeof node !== "object") return out
 
     if (
@@ -36,30 +36,37 @@ function collectNotes(node: any, out: any[] = []) {
     return out
 }
 
-export default async function handler(req: any, res: any) {
-    const html = await fetch(MAGAZINE_URL, {
-        headers: { "user-agent": "Mozilla/5.0" },
-    }).then((r) => r.text())
+export default async function handler(req, res) {
+    try {
+        const html = await fetch(MAGAZINE_URL, {
+            headers: { "user-agent": "Mozilla/5.0" },
+        }).then((r) => r.text())
 
-    const nuxt = extractNuxt(html)
-    const seen = new Set<string>()
+        const nuxt = extractNuxt(html)
+        const seen = new Set()
 
-    const items = collectNotes(nuxt)
-        .filter((note) => {
-            if (seen.has(note.noteUrl)) return false
-            seen.add(note.noteUrl)
-            return true
+        const items = collectNotes(nuxt)
+            .filter((note) => {
+                if (seen.has(note.noteUrl)) return false
+                seen.add(note.noteUrl)
+                return true
+            })
+            .map((note) => ({
+                title: note.name,
+                link: note.noteUrl,
+                description: stripHtml(note.body || note.description || ""),
+                pubDate: note.publishAt,
+                thumbnail: note.eyecatch || "",
+                author: (note.user && (note.user.nickname || note.user.name)) || "",
+                avatar: (note.user && note.user.userProfileImagePath) || "",
+                likes: note.likeCount,
+            }))
+
+        res.status(200).json({ items })
+    } catch (error) {
+        res.status(500).json({
+            error: "Failed to fetch note feed",
+            details: error instanceof Error ? error.message : String(error),
         })
-        .map((note) => ({
-            title: note.name,
-            link: note.noteUrl,
-            description: stripHtml(note.body || note.description || ""),
-            pubDate: note.publishAt,
-            thumbnail: note.eyecatch || "",
-            author: note.user?.nickname || note.user?.name || "",
-            avatar: note.user?.userProfileImagePath || "",
-            likes: note.likeCount,
-        }))
-
-    res.status(200).json({ items })
+    }
 }
