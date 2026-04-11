@@ -19,9 +19,22 @@ export default async function handler(req, res) {
 
     const data = JSON.parse(text)
 
+    const items = Array.isArray(data.items)
+      ? data.items.map((item) => ({
+          title: item.title || "",
+          link: item.link || "",
+          description: item.description || "",
+          pubDate: item.pubDate || "",
+          thumbnail: item.thumbnail || item.image || "",
+          author: item.author || "",
+          avatar: item.avatar || "",
+          likes: typeof item.likes === "number" ? item.likes : 0,
+        }))
+      : []
+
     res.setHeader("Access-Control-Allow-Origin", "*")
     res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400")
-    return res.status(200).json(data)
+    return res.status(200).json({ items })
   } catch (e) {
     return res.status(500).json({
       error: "データ取得中にエラーが発生しました",
